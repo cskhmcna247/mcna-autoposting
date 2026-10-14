@@ -1,0 +1,11 @@
+.env
+config/google_credentials.json
+logs/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+Backup-codes-*.txt
+frontend.zip
+*.docx
