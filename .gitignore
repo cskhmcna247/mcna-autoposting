@@ -1,0 +1,19 @@
+.env
+config/google_credentials.json
+logs/
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+frontend/dist/
+Backup-codes-*.txt
+*.jpg
+*.jpeg
+*.png
+!frontend/public/**
+uploads/
+.claude/
+anh upload/
+*.bak
+frontend/src/lib/supabase.js

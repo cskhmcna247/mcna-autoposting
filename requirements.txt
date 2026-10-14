@@ -1,0 +1,14 @@
+schedule==1.2.2
+requests==2.32.3
+gspread==6.1.4
+google-auth==2.38.0
+google-auth-oauthlib==1.2.1
+mysql-connector-python==9.1.0
+psycopg2-binary==2.9.10
+python-dotenv==1.0.1
+Pillow==11.1.0
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.18
+apscheduler==3.10.4
+supabase==2.10.0
