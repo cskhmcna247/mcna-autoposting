@@ -83,9 +83,9 @@ class FacebookPoster:
         if not image_url:
             return self._post_text(content)
 
+        # Luon dang qua /feed + attached_media (ke ca 1 anh) de noi dung hien
+        # tren News Feed. Dang qua /photos thi noi dung chi la caption cua anh.
         urls = [u.strip() for u in image_url.split(",") if u.strip()]
-        if len(urls) == 1:
-            return self._post_with_image(content, urls[0])
         return self._post_multi_images(content, urls)
 
     def _post_text(self, content: str) -> dict:
@@ -105,26 +105,6 @@ class FacebookPoster:
 
         post_id = data.get("id", "")
         logger.info(f"Dang bai Facebook thanh cong: {post_id}")
-        return {"platform": "facebook", "post_id": post_id, "success": True}
-
-    def _post_with_image(self, content: str, image_url: str) -> dict:
-        url = f"{GRAPH_API_BASE}/{self.page_id}/photos"
-        payload = {
-            "message": content,
-            "url": image_url,
-            "access_token": self.access_token,
-        }
-
-        resp = requests.post(url, data=payload, timeout=60)
-        data = resp.json()
-
-        if "error" in data:
-            error_msg = data["error"].get("message", "Unknown error")
-            logger.error(f"Facebook photo post that bai: {error_msg}")
-            raise RuntimeError(f"Facebook API error: {error_msg}")
-
-        post_id = data.get("post_id", data.get("id", ""))
-        logger.info(f"Dang bai Facebook (1 anh) thanh cong: {post_id}")
         return {"platform": "facebook", "post_id": post_id, "success": True}
 
     def _post_multi_images(self, content: str, image_urls: list) -> dict:

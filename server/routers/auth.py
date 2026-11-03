@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import os
 import uuid
 import logging
 from datetime import datetime, timedelta
@@ -20,6 +23,9 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 24 * 7
 
 _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Dung chung bang "users" voi ban dang chay tren server (autoposting.mcna.vn)
+USERS_TABLE = "users"
 
 
 class LoginRequest(BaseModel):
@@ -45,11 +51,27 @@ class CreateUserRequest(BaseModel):
 
 
 def _hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    # Cung dinh dang voi server: "<salt_hex>$<pbkdf2_hex>"
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
+    return f"{salt.hex()}${dk.hex()}"
+
+
+def _is_bcrypt(hashed: str) -> bool:
+    return hashed.startswith(("$2a$", "$2b$", "$2y$"))
 
 
 def _check_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    # Tai khoan cu chuyen tu bang profiles van dung bcrypt
+    if _is_bcrypt(hashed):
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    try:
+        salt_hex, dk_hex = hashed.split("$")
+        salt = bytes.fromhex(salt_hex)
+    except ValueError:
+        return False
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
+    return hmac.compare_digest(dk.hex(), dk_hex)
 
 
 def _create_token(user: dict) -> str:
@@ -94,13 +116,13 @@ def register(body: RegisterRequest):
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Mat khau phai co it nhat 6 ky tu")
 
-    existing = _supabase.table("profiles").select("id").eq("email", body.email.lower()).execute()
+    existing = _supabase.table(USERS_TABLE).select("id").eq("email", body.email.lower()).execute()
     if existing.data:
         raise HTTPException(status_code=400, detail="Email da duoc su dung")
 
     display_name = body.display_name or body.email.split("@")[0]
 
-    all_users = _supabase.table("profiles").select("id").limit(1).execute()
+    all_users = _supabase.table(USERS_TABLE).select("id").limit(1).execute()
     is_first_user = len(all_users.data) == 0
 
     new_user = {
@@ -110,7 +132,7 @@ def register(body: RegisterRequest):
         "display_name": display_name,
         "role": "admin" if is_first_user else "member",
     }
-    _supabase.table("profiles").insert(new_user).execute()
+    _supabase.table(USERS_TABLE).insert(new_user).execute()
 
     token = _create_token(new_user)
     logger.info(f"Dang ky thanh cong: {body.email}")
@@ -128,13 +150,19 @@ def register(body: RegisterRequest):
 
 @router.post("/login")
 def login(body: LoginRequest):
-    result = _supabase.table("profiles").select("*").eq("email", body.email.lower()).execute()
+    result = _supabase.table(USERS_TABLE).select("*").eq("email", body.email.lower()).execute()
     if not result.data:
         raise HTTPException(status_code=401, detail="Email hoac mat khau khong dung")
 
     user = result.data[0]
     if not user.get("password_hash") or not _check_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Email hoac mat khau khong dung")
+
+    # Doi mat khau bcrypt sang dinh dang cua server de dang nhap duoc ca tren server
+    if _is_bcrypt(user["password_hash"]):
+        _supabase.table(USERS_TABLE).update(
+            {"password_hash": _hash_password(body.password)}
+        ).eq("id", user["id"]).execute()
 
     token = _create_token(user)
     logger.info(f"Dang nhap thanh cong: {body.email}")
@@ -164,7 +192,7 @@ def get_me(request: Request):
 @router.get("/users")
 def list_users(request: Request):
     _require_admin(request)
-    result = _supabase.table("profiles").select("id, email, display_name, role, created_at").order("created_at").execute()
+    result = _supabase.table(USERS_TABLE).select("id, email, display_name, role, created_at").order("created_at").execute()
     return {"users": result.data}
 
 
@@ -177,7 +205,7 @@ def admin_create_user(body: CreateUserRequest, request: Request):
     if len(body.password) < 6:
         raise HTTPException(status_code=400, detail="Mat khau phai co it nhat 6 ky tu")
 
-    existing = _supabase.table("profiles").select("id").eq("email", body.email.lower()).execute()
+    existing = _supabase.table(USERS_TABLE).select("id").eq("email", body.email.lower()).execute()
     if existing.data:
         raise HTTPException(status_code=400, detail="Email da duoc su dung")
 
@@ -188,7 +216,7 @@ def admin_create_user(body: CreateUserRequest, request: Request):
         "display_name": body.display_name or body.email.split("@")[0],
         "role": body.role,
     }
-    _supabase.table("profiles").insert(new_user).execute()
+    _supabase.table(USERS_TABLE).insert(new_user).execute()
     logger.info(f"Admin tao user: {body.email} ({body.role})")
 
     return {
@@ -208,7 +236,7 @@ def update_user_role(user_id: str, body: UpdateRoleRequest, request: Request):
     if admin["id"] == user_id:
         raise HTTPException(status_code=400, detail="Khong the thay doi role cua chinh minh")
 
-    result = _supabase.table("profiles").update({"role": body.role}).eq("id", user_id).execute()
+    result = _supabase.table(USERS_TABLE).update({"role": body.role}).eq("id", user_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="User khong ton tai")
 
@@ -223,7 +251,7 @@ def delete_user(user_id: str, request: Request):
     if admin["id"] == user_id:
         raise HTTPException(status_code=400, detail="Khong the xoa chinh minh")
 
-    result = _supabase.table("profiles").delete().eq("id", user_id).execute()
+    result = _supabase.table(USERS_TABLE).delete().eq("id", user_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="User khong ton tai")
 
