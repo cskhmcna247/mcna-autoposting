@@ -10,15 +10,20 @@ from src.text_format import social_text
 logger = logging.getLogger(__name__)
 
 
-def _to_absolute_url(url):
-    """Anh upload noi bo luu dang '/uploads/xxx.jpg' (relative path).
-    Facebook/WordPress API can URL tuyet doi de tai anh ve."""
-    if not url:
-        return url
-    url = url.split(",")[0].strip()  # chi lay anh dau tien neu co nhieu anh phan cach dau phay
-    if url.startswith("http://") or url.startswith("https://"):
-        return url
-    return f"{PUBLIC_BASE_URL.rstrip('/')}/{url.lstrip('/')}"
+def _image_urls(post):
+    """Danh sach URL anh day du cua bai (cot image_url phan cach bang dau phay).
+
+    Anh upload noi bo luu dang '/uploads/xxx.jpg' (relative); Facebook/LinkedIn/WordPress
+    can URL tuyet doi de tai anh ve."""
+    urls = []
+    for raw in (post.get("image_url") or "").split(","):
+        url = raw.strip()
+        if not url or url.startswith("data:"):
+            continue
+        if not (url.startswith("http://") or url.startswith("https://")):
+            url = f"{PUBLIC_BASE_URL.rstrip('/')}/{url.lstrip('/')}"
+        urls.append(url)
+    return urls
 
 
 COMMENT_SUFFIX = "_comment"
@@ -35,19 +40,20 @@ def comment_warnings(results):
 
 
 def _post_facebook(poster, post):
-    return poster.post(social_text(post), image_url=_to_absolute_url(post.get("image_url")))
+    return poster.post(social_text(post), image_urls=_image_urls(post))
 
 
 def _post_linkedin(poster, post):
-    return poster.post(social_text(post), image_url=_to_absolute_url(post.get("image_url")))
+    return poster.post(social_text(post), image_urls=_image_urls(post))
 
 
 def _post_wordpress(poster, post):
-    poster.post(
+    return poster.post(
         title=post["title"],
-        content=post.get("content_social") or post["content"],
-        image_url=_to_absolute_url(post.get("image_url")),
+        content=post["content"],
+        image_urls=_image_urls(post),
         category_ids=post.get("wp_category_ids"),
+        wp_meta=post.get("wp_meta"),
     )
 
 

@@ -1,13 +1,16 @@
 import io
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from PIL import Image
 
 from server.auth import get_current_admin, get_current_user
-from src.config_loader import BASE_DIR
+from src.config_loader import BASE_DIR, SUPABASE_URL
+from src.supabase_client import get_client
 from src.content_sources import database
 from src.workflow import publish_post, WorkflowPartialError, comment_warnings, is_comment_key
 
@@ -18,6 +21,22 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 MIN_IMAGE_WIDTH = 1080
+IMAGE_BUCKET = "post-images"
+
+logger = logging.getLogger(__name__)
+
+
+def _store_image(name, content, content_type):
+    """Uu tien Supabase Storage (URL cong khai, ben vung); loi thi luu cuc bo tai /uploads."""
+    try:
+        get_client().storage.from_(IMAGE_BUCKET).upload(
+            name, content, {"content-type": content_type or "image/jpeg"}
+        )
+        return f"{SUPABASE_URL}/storage/v1/object/public/{IMAGE_BUCKET}/{name}"
+    except Exception:
+        logger.exception("Upload Supabase Storage loi, luu cuc bo")
+        (UPLOAD_DIR / name).write_bytes(content)
+        return f"/uploads/{name}"
 
 
 @router.get("")
@@ -142,10 +161,8 @@ async def upload_images(files: list[UploadFile], user=Depends(get_current_user))
             raise HTTPException(status_code=400, detail=f"Dinh dang anh khong ho tro: {ext}")
 
         new_name = f"{uuid.uuid4().hex}{ext}"
-        dest = UPLOAD_DIR / new_name
         content = await file.read()
-        dest.write_bytes(content)
-        urls.append(f"/uploads/{new_name}")
+        urls.append(await run_in_threadpool(_store_image, new_name, content, file.content_type))
 
         try:
             with Image.open(io.BytesIO(content)) as img:

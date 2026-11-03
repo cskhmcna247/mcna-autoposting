@@ -40,3 +40,6 @@ create table if not exists users (
 -- backend FastAPI (co kiem tra JWT/role o tang API, khong expose Supabase key ra
 -- frontend cho bang nay), tat RLS la chap nhan duoc o quy mo noi bo nay.
 alter table users disable row level security;
+
+-- WordPress: slug, trich dan, the, Yoast SEO, muc luc (JSON). Da co tren Supabase that.
+alter table posts add column if not exists wp_meta text;

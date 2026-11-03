@@ -76,7 +76,7 @@ class LinkedInPoster:
 
         return asset
 
-    def post(self, message, image_url=None):
+    def post(self, message, image_urls=None):
         if not self.token or not self.author_urn:
             raise RuntimeError("Thieu LINKEDIN_ACCESS_TOKEN hoac LINKEDIN_PERSON_URN/LINKEDIN_ORG_URN")
 
@@ -85,10 +85,14 @@ class LinkedInPoster:
             "shareMediaCategory": "NONE",
         }
 
-        if image_url:
-            asset = self._upload_image(image_url)
+        if isinstance(image_urls, str):
+            image_urls = [image_urls]
+        urls = [u for u in (image_urls or []) if u]
+
+        if urls:
+            assets = [self._upload_image(u) for u in urls]
             share_content["shareMediaCategory"] = "IMAGE"
-            share_content["media"] = [{"status": "READY", "media": asset}]
+            share_content["media"] = [{"status": "READY", "media": a} for a in assets]
 
         payload = {
             "author": self.author_urn,

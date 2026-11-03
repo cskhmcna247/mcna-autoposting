@@ -30,36 +30,44 @@ class FacebookPoster:
             return False
         return True
 
-    def post(self, message, image_url=None):
+    def _call(self, path, data, timeout=60):
+        resp = requests.post(f"{GRAPH_API}/{path}", data=data, timeout=timeout)
+        body = resp.json()
+        if "error" in body:
+            raise RuntimeError(f"Facebook API loi: {body['error'].get('message')}")
+        return body
+
+    def post(self, message, image_urls=None):
         if not self.page_id or not self.token:
             raise RuntimeError("Thieu FACEBOOK_PAGE_ID hoac FACEBOOK_ACCESS_TOKEN")
 
-        if image_url:
-            resp = requests.post(
-                f"{GRAPH_API}/{self.page_id}/photos",
-                data={
-                    "url": image_url,
-                    "caption": message,
-                    "access_token": self.token,
-                },
-                timeout=30,
+        if isinstance(image_urls, str):
+            image_urls = [image_urls]
+        urls = [u for u in (image_urls or []) if u]
+
+        if not urls:
+            body = self._call(f"{self.page_id}/feed", {"message": message, "access_token": self.token}, 30)
+        elif len(urls) == 1:
+            body = self._call(
+                f"{self.page_id}/photos",
+                {"url": urls[0], "caption": message, "access_token": self.token},
             )
         else:
-            resp = requests.post(
-                f"{GRAPH_API}/{self.page_id}/feed",
-                data={
-                    "message": message,
-                    "access_token": self.token,
-                },
-                timeout=30,
-            )
+            photo_ids = []
+            for url in urls:
+                photo = self._call(
+                    f"{self.page_id}/photos",
+                    {"url": url, "published": "false", "access_token": self.token},
+                )
+                photo_ids.append(photo["id"])
 
-        data = resp.json()
-        if "error" in data:
-            raise RuntimeError(f"Facebook API loi: {data['error'].get('message')}")
+            payload = {"message": message, "access_token": self.token}
+            for i, photo_id in enumerate(photo_ids):
+                payload[f"attached_media[{i}]"] = '{"media_fbid":"%s"}' % photo_id
+            body = self._call(f"{self.page_id}/feed", payload, 30)
 
-        post_id = data.get("post_id") or data.get("id")
-        logger.info("Da dang bai Facebook, post_id=%s", post_id)
+        post_id = body.get("post_id") or body.get("id")
+        logger.info("Da dang bai Facebook (%d anh), post_id=%s", len(urls), post_id)
         return post_id
 
     def comment(self, post_id, message):

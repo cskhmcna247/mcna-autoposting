@@ -1,39 +1,56 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { X, Globe, MessageSquareShare, Share2, ChevronUp, ChevronDown, Clock, Image, Tag, Send, Save, Eye, MessageCircle } from 'lucide-react'
+import { X, MessageSquareShare, Share2, Globe, ChevronUp, ChevronDown, ImagePlus, Pin, Eye, Calendar, Flag } from 'lucide-react'
 import { Editor } from '@tinymce/tinymce-react'
 import { posts, platforms } from '../api/client'
-import PublishModal from '../components/PublishModal'
 import { useAuth } from '../contexts/AuthContext'
+import PublishModal from '../components/PublishModal'
 
 const PLATFORM_CONFIG = {
-  facebook: { label: 'Facebook', icon: MessageSquareShare, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200', check: 'accent-blue-600' },
-  linkedin: { label: 'LinkedIn', icon: Share2, color: 'text-sky-600', bg: 'bg-sky-50 border-sky-200', check: 'accent-sky-600' },
-  wordpress: { label: 'WordPress', icon: Globe, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200', check: 'accent-blue-600' },
+  facebook: { label: 'Facebook', icon: MessageSquareShare },
+  linkedin: { label: 'LinkedIn', icon: Share2 },
+  wordpress: { label: 'WordPress', icon: Globe },
 }
 
-function SidebarPanel({ title, icon: Icon, defaultOpen = true, children, variant }) {
+function MetaBox({ title, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen)
-  const borderColor = variant === 'primary' ? 'border-blue-300' : 'border-gray-200'
-  const headerBg = variant === 'primary' ? 'bg-blue-50 border-b border-blue-200' : 'bg-gray-50 border-b border-gray-200'
-  const titleColor = variant === 'primary' ? 'text-blue-800' : 'text-gray-700'
-
   return (
-    <div className={`border rounded-lg overflow-hidden ${borderColor}`}>
+    <div className="wp-box">
       <button
         type="button"
+        className="wp-box-head"
         onClick={() => setOpen(o => !o)}
-        className={`w-full flex items-center justify-between px-3.5 py-2.5 ${headerBg} hover:brightness-95 transition-all`}
+        style={open ? undefined : { borderBottom: 0 }}
       >
-        <div className="flex items-center gap-2">
-          {Icon && <Icon size={15} className={titleColor} />}
-          <span className={`text-sm font-semibold ${titleColor}`}>{title}</span>
-        </div>
-        {open ? <ChevronUp size={15} className="text-gray-400" /> : <ChevronDown size={15} className="text-gray-400" />}
+        <h2>{title}</h2>
+        {open ? <ChevronUp size={16} color="#50575e" /> : <ChevronDown size={16} color="#50575e" />}
       </button>
-      {open && <div className="p-3.5 bg-white">{children}</div>}
+      {open && children}
     </div>
   )
+}
+
+const WP_META_DEFAULT = {
+  slug: '', excerpt: '', tags: '',
+  focus_kw: '', seo_title: '', meta_desc: '',
+  toc_disable: false, toc_label: '', toc_position: '',
+  toc_word_limit: '', toc_device: '', toc_align: '', toc_headings: '',
+  toc_initial_hide: false, toc_hide_counter: false, toc_alt_titles: '', toc_exclude: '',
+}
+const WP_META_KEYS = Object.keys(WP_META_DEFAULT)
+
+const parseMeta = (raw) => {
+  try { return { ...WP_META_DEFAULT, ...(JSON.parse(raw || '{}') || {}) } } catch { return { ...WP_META_DEFAULT } }
+}
+
+const slugify = (str) => (str || '')
+  .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D')
+  .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+const plainText = (html) => {
+  const d = document.createElement('div')
+  d.innerHTML = html || ''
+  return (d.textContent || '').trim()
 }
 
 export default function PostFormPage() {
@@ -54,10 +71,13 @@ export default function PostFormPage() {
     priority: 'medium',
     wp_category_ids: '',
     comment_text: '',
+    ...WP_META_DEFAULT,
   })
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [wpEditorMode, setWpEditorMode] = useState('visual')
+  const [showPreview, setShowPreview] = useState(false)
+  const [catTab, setCatTab] = useState('all')
   const [wpCategories, setWpCategories] = useState([])
   const [loadingCats, setLoadingCats] = useState(false)
   const [postStatus, setPostStatus] = useState(null)
@@ -74,6 +94,7 @@ export default function PostFormPage() {
 
   const hasWordPress = selected.wordpress
   const hasSocial = selected.facebook || selected.linkedin
+  const socialLabel = [selected.facebook && 'Facebook', selected.linkedin && 'LinkedIn'].filter(Boolean).join(' & ')
 
   const togglePlatform = (platform) => {
     const parts = form.platforms.split(',').map(p => p.trim()).filter(Boolean)
@@ -101,6 +122,7 @@ export default function PostFormPage() {
           priority: post.priority || 'medium',
           wp_category_ids: post.wp_category_ids || '',
           comment_text: post.comment_text || '',
+          ...parseMeta(post.wp_meta),
         })
       })
     }
@@ -130,27 +152,31 @@ export default function PostFormPage() {
     setForm(f => ({ ...f, wp_category_ids: current.join(',') }))
   }
 
+  const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
+
+  const setBool = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.checked }))
+  const tocHeadings = (form.toc_headings || '').split(',').filter(Boolean)
+  const toggleTocHeading = (n) => {
+    const cur = new Set(tocHeadings)
+    const k = String(n)
+    if (cur.has(k)) cur.delete(k)
+    else cur.add(k)
+    setForm(f => ({ ...f, toc_headings: [...cur].sort().join(',') }))
+  }
+
+  const getCurrentContent = () => (
+    hasWordPress && wpEditorMode === 'visual' && editorRef.current
+      ? editorRef.current.getContent()
+      : form.content
+  )
+
   const scheduledFuture = !!form.scheduled_time && new Date(form.scheduled_time) > new Date()
   const canPublish = isAdmin && (!isEdit || postStatus === 'draft' || (postStatus || '').startsWith('failed'))
   const publishNow = canPublish && !scheduledFuture
 
-  let submitLabel = 'Lưu nháp'
-  if (isAdmin) {
-    submitLabel = publishNow ? 'Xuất bản' : scheduledFuture ? 'Hẹn giờ đăng' : 'Cập nhật'
-  } else if (isEdit) {
-    submitLabel = 'Cập nhật'
-  }
-
   const buildData = () => {
-    if (hasWordPress && wpEditorMode === 'visual' && editorRef.current) {
-      setForm(f => ({ ...f, content: editorRef.current.getContent() }))
-    }
-    const currentContent = (hasWordPress && wpEditorMode === 'visual' && editorRef.current)
-      ? editorRef.current.getContent()
-      : form.content
-    const checkContent = hasWordPress
-      ? (() => { const d = document.createElement('div'); d.innerHTML = currentContent; return (d.textContent || '').trim() })()
-      : currentContent.trim()
+    const currentContent = getCurrentContent()
+    const checkContent = hasWordPress ? plainText(currentContent) : currentContent.trim()
     if (!checkContent) {
       alert('Vui lòng nhập nội dung bài đăng')
       return null
@@ -170,6 +196,11 @@ export default function PostFormPage() {
       data.wp_category_ids = form.wp_category_ids
     }
     data.comment_text = hasSocial && form.comment_text.trim() ? form.comment_text : null
+    if (hasWordPress) {
+      const meta = {}
+      WP_META_KEYS.forEach(k => { if (form[k]) meta[k] = form[k] })
+      data.wp_meta = JSON.stringify(meta)
+    }
     if (!isEdit && !savedId) data.created_by = user?.display_name || ''
     return data
   }
@@ -227,6 +258,13 @@ export default function PostFormPage() {
     }
   }
 
+  const warnLowRes = (result) => {
+    if (result.low_res?.length) {
+      const list = result.low_res.map(i => `${i.name} (${i.width}x${i.height})`).join(', ')
+      alert(`Ảnh có độ phân giải thấp, đăng lên Facebook dễ bị mờ/vỡ chữ: ${list}.\nNên dùng ảnh rộng từ ${result.min_width}px trở lên.`)
+    }
+  }
+
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files)
     if (!files.length) return
@@ -235,9 +273,27 @@ export default function PostFormPage() {
       const result = await posts.uploadImages(files)
       const newUrls = [...imageUrls, ...result.urls]
       setForm(f => ({ ...f, image_url: newUrls.join(',') }))
-      if (result.low_res?.length) {
-        const list = result.low_res.map(i => `${i.name} (${i.width}x${i.height})`).join(', ')
-        alert(`Ảnh có độ phân giải thấp, đăng lên Facebook dễ bị mờ/vỡ chữ: ${list}.\nNên dùng ảnh rộng từ ${result.min_width}px trở lên.`)
+      warnLowRes(result)
+    } catch {
+      alert('Upload ảnh thất bại')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  // "Thêm tập tin phương tiện": chèn ảnh thẳng vào nội dung bài viết
+  const handleInsertMedia = async (e) => {
+    const files = Array.from(e.target.files)
+    if (!files.length) return
+    setUploading(true)
+    try {
+      const result = await posts.uploadImages(files)
+      const html = result.urls.map(u => `<p><img src="${u}" alt="" /></p>`).join('')
+      if (wpEditorMode === 'visual' && editorRef.current) {
+        editorRef.current.insertContent(html)
+      } else {
+        setForm(f => ({ ...f, content: (f.content || '') + html }))
       }
     } catch {
       alert('Upload ảnh thất bại')
@@ -254,14 +310,13 @@ export default function PostFormPage() {
 
   const handleTinyMCEImageUpload = (blobInfo) => {
     return new Promise((resolve, reject) => {
-      const file = blobInfo.blob()
-      posts.uploadImages([file])
+      posts.uploadImages([blobInfo.blob()])
         .then(result => {
           const url = result.urls?.[0]
           if (url) resolve(url)
-          else reject('Upload that bai')
+          else reject('Upload thất bại')
         })
-        .catch(() => reject('Upload that bai'))
+        .catch(() => reject('Upload thất bại'))
     })
   }
 
@@ -278,350 +333,449 @@ export default function PostFormPage() {
     setWpEditorMode(mode)
   }
 
+  const handleTrash = async () => {
+    if (!isEdit) { navigate('/posts'); return }
+    if (!confirm('Chuyển bài viết này vào thùng rác?')) return
+    try {
+      await posts.delete(id)
+      navigate('/posts')
+    } catch (err) {
+      alert('Lỗi: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+
+  let submitLabel = 'Lưu nháp'
+  if (loading) submitLabel = 'Đang lưu...'
+  else if (isAdmin) submitLabel = publishNow ? 'Xuất bản' : scheduledFuture ? 'Hẹn giờ đăng' : 'Cập nhật'
+  else if (isEdit) submitLabel = 'Cập nhật'
+  const wordCount = (() => {
+    const t = plainText(form.content)
+    return t ? t.split(/\s+/).length : 0
+  })()
+
   return (
-    <form onSubmit={handleSubmit}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-xl font-bold text-gray-900">
-          {isEdit ? 'Chỉnh sửa bài đăng' : 'Thêm bài viết mới'}
-        </h2>
-      </div>
+    <form onSubmit={handleSubmit} className="wp-wrap">
+      <h1 className="wp-heading">{isEdit ? 'Sửa bài viết' : 'Thêm bài viết'}</h1>
 
       {!isEdit && !isAdmin && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm text-amber-800">
+        <div style={{ background: '#fcf9e8', borderLeft: '4px solid #dba617', padding: '10px 12px', marginBottom: 16, boxShadow: '0 1px 1px rgba(0,0,0,.04)' }}>
           Bài đăng của bạn sẽ ở trạng thái <strong>Bản nháp</strong> và cần Admin duyệt trước khi đăng.
         </div>
       )}
 
-      {/* Two-column layout */}
-      <div className="flex gap-5 items-start">
-        {/* Main content area */}
-        <div className="flex-1 min-w-0 space-y-4">
-          {/* Title */}
+      <div className="wp-layout">
+        {/* ===== Cột chính ===== */}
+        <div className="wp-main">
           <input
             value={form.title}
             onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))}
-            className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white placeholder-gray-400"
+            className="wp-title"
             placeholder="Thêm tiêu đề"
           />
 
-          {/* WordPress visual editor */}
           {hasWordPress && (
-            <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
-              {/* Editor mode tabs */}
-              <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-1">
-                <div className="flex">
-                  {[
-                    { key: 'visual', label: 'Trực quan', icon: Eye },
-                    { key: 'html', label: 'Mã', icon: null },
-                  ].map(m => (
-                    <button
-                      key={m.key}
-                      type="button"
-                      onClick={() => switchMode(m.key)}
-                      className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 ${
-                        wpEditorMode === m.key
-                          ? 'border-blue-500 text-blue-700 bg-white'
-                          : 'border-transparent text-gray-500 hover:text-gray-700'
-                      }`}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
+            <>
+              <div className="wp-editor-tools">
+                <label className="wp-btn wp-media-btn" style={uploading ? { opacity: 0.5 } : undefined}>
+                  <ImagePlus size={15} /> {uploading ? 'Đang tải lên...' : 'Thêm tập tin phương tiện'}
+                  <input type="file" accept="image/*" multiple onChange={handleInsertMedia} style={{ display: 'none' }} />
+                </label>
+                <div className="wp-tabs">
+                  <button type="button" className={`wp-tab ${wpEditorMode === 'visual' ? 'active' : ''}`} onClick={() => switchMode('visual')}>Trực quan</button>
+                  <button type="button" className={`wp-tab ${wpEditorMode === 'html' ? 'active' : ''}`} onClick={() => switchMode('html')}>Văn bản</button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => switchMode('preview')}
-                  className={`px-3 py-2 text-sm transition-colors ${
-                    wpEditorMode === 'preview' ? 'text-blue-700 font-medium' : 'text-gray-400 hover:text-gray-600'
-                  }`}
-                >
-                  Xem trước
-                </button>
               </div>
 
-              {wpEditorMode === 'visual' && (
-                <Editor
-                  tinymceScriptSrc="/tinymce/tinymce.min.js"
-                  onInit={(_evt, editor) => { editorRef.current = editor }}
-                  initialValue={form.content}
-                  onBlur={syncEditorToForm}
-                  init={{
-                    height: 450,
-                    menubar: 'file edit view insert format table',
-                    plugins: 'table lists link image code autolink wordcount advlist media',
-                    toolbar: 'blocks | bold italic underline strikethrough | forecolor backcolor | alignleft aligncenter alignright alignjustify | bullist numlist | table | link image media | code | removeformat',
-                    content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1.7; padding: 8px; }',
-                    images_upload_handler: handleTinyMCEImageUpload,
-                    automatic_uploads: true,
-                    file_picker_types: 'image',
-                    promotion: false,
-                    branding: false,
-                    license_key: 'gpl',
-                    paste_data_images: true,
-                    table_toolbar: 'tableprops tabledelete | tableinsertrowbefore tableinsertrowafter tabledeleterow | tableinsertcolbefore tableinsertcolafter tabledeletecol',
-                    table_default_styles: { 'border-collapse': 'collapse', width: '100%' },
-                    table_default_attributes: { border: '1' },
-                    statusbar: true,
-                    elementpath: true,
-                  }}
-                />
-              )}
+              <div className="wp-editor-wrap">
+                {wpEditorMode === 'visual' && (
+                  <Editor
+                    tinymceScriptSrc="/tinymce/tinymce.min.js"
+                    onInit={(_evt, editor) => { editorRef.current = editor }}
+                    initialValue={form.content}
+                    onBlur={syncEditorToForm}
+                    init={{
+                      height: 500,
+                      menubar: false,
+                      plugins: 'table lists link image code autolink wordcount advlist media charmap fullscreen',
+                      toolbar: 'blocks | bold italic | bullist numlist blockquote | alignleft aligncenter alignright | link | table image media | fullscreen | strikethrough hr forecolor backcolor | pastetext removeformat charmap | outdent indent | undo redo | code',
+                      toolbar_mode: 'wrap',
+                      content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 16px; line-height: 1.7; padding: 10px; }',
+                      images_upload_handler: handleTinyMCEImageUpload,
+                      automatic_uploads: true,
+                      file_picker_types: 'image',
+                      promotion: false,
+                      branding: false,
+                      license_key: 'gpl',
+                      paste_data_images: true,
+                      table_default_styles: { 'border-collapse': 'collapse', width: '100%' },
+                      table_default_attributes: { border: '1' },
+                      statusbar: true,
+                      elementpath: true,
+                    }}
+                  />
+                )}
+                {wpEditorMode === 'html' && (
+                  <textarea
+                    value={form.content}
+                    onChange={(e) => setForm(f => ({ ...f, content: e.target.value }))}
+                    className="wp-textarea"
+                    placeholder="Dán HTML từ WordPress, Gutenberg hoặc nguồn khác..."
+                    spellCheck={false}
+                  />
+                )}
+              </div>
+              <div className="wp-wordcount">Số từ: {wordCount}</div>
 
-              {wpEditorMode === 'html' && (
-                <textarea
-                  value={form.content}
-                  onChange={(e) => setForm(f => ({ ...f, content: e.target.value }))}
-                  rows={18}
-                  placeholder="Paste HTML từ WordPress, Gutenberg, hoặc nguồn khác..."
-                  className="w-full px-4 py-3 text-sm font-mono focus:outline-none resize-y min-h-[400px]"
-                  spellCheck={false}
-                />
-              )}
+              <MetaBox title="Yoast SEO">
+                <div className="wp-box-body">
+                  <label className="wp-label">Cụm từ khóa chính</label>
+                  <input className="wp-field" value={form.focus_kw} onChange={set('focus_kw')} />
 
-              {wpEditorMode === 'preview' && (
-                <div className="px-6 py-5 min-h-[400px] prose prose-sm max-w-none overflow-x-auto">
-                  {form.content ? (
-                    <div dangerouslySetInnerHTML={{ __html: form.content }} />
-                  ) : (
-                    <p className="text-gray-400 italic">Chưa có nội dung</p>
-                  )}
+                  <div className="wp-label" style={{ marginTop: 16 }}>Google xem trước</div>
+                  <div className="wp-serp">
+                    <div className="wp-serp-url">{(window.__WP_HOST__ || 'mcna.vn')} › {form.slug || slugify(form.title) || 'duong-dan'}</div>
+                    <div className="wp-serp-title">{form.seo_title || form.title || 'Tiêu đề SEO'} - MCNA</div>
+                    <div className="wp-serp-desc">{form.meta_desc || plainText(form.content).slice(0, 155) || 'Mô tả sẽ hiển thị trong kết quả tìm kiếm.'}</div>
+                  </div>
+
+                  <label className="wp-label" style={{ marginTop: 16 }}>Tiêu đề SEO</label>
+                  <input className="wp-field" value={form.seo_title} onChange={set('seo_title')} placeholder="Tiêu đề trang - Tiêu đề website" />
+
+                  <label className="wp-label" style={{ marginTop: 16 }}>Đường dẫn</label>
+                  <input className="wp-field" value={form.slug} onChange={set('slug')} placeholder={slugify(form.title)} />
+
+                  <label className="wp-label" style={{ marginTop: 16 }}>
+                    Thẻ mô tả <span style={{ color: '#646970', fontWeight: 400 }}>({form.meta_desc.length}/156)</span>
+                  </label>
+                  <textarea className="wp-field" style={{ minHeight: 80, padding: 8 }} value={form.meta_desc} onChange={set('meta_desc')} />
                 </div>
-              )}
-            </div>
+              </MetaBox>
+
+              <MetaBox title="Trích dẫn" defaultOpen={false}>
+                <div className="wp-box-body">
+                  <textarea className="wp-field" style={{ minHeight: 80, padding: 8 }} value={form.excerpt} onChange={set('excerpt')} />
+                  <p style={{ color: '#646970', margin: '6px 0 0' }}>Đoạn trích là phần tóm tắt tùy chọn của nội dung bài viết.</p>
+                </div>
+              </MetaBox>
+
+              <MetaBox title="Mục lục">
+                <div className="wp-toc">
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label" />
+                    <div className="wp-toc-field">
+                      <label className="wp-toc-check">
+                        <input type="checkbox" checked={!!form.toc_disable} onChange={setBool('toc_disable')} />
+                        Tắt tính năng tự động chèn mục lục.
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Nhãn tiêu đề</div>
+                    <div className="wp-toc-field">
+                      <input className="wp-field wp-toc-input" value={form.toc_label} onChange={set('toc_label')} />
+                      <p className="wp-toc-help">Ví dụ: Nội dung, Mục lục, Nội dung trang</p>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Vị trí</div>
+                    <div className="wp-toc-field">
+                      <select className="wp-field wp-toc-select" value={form.toc_position} onChange={set('toc_position')}>
+                        <option value="">Chọn vị trí</option>
+                        <option value="before">Trước tiêu đề đầu tiên</option>
+                        <option value="after">Sau tiêu đề đầu tiên</option>
+                        <option value="top">Đầu bài viết</option>
+                        <option value="bottom">Cuối bài viết</option>
+                      </select>
+                      <span className="wp-toc-help-inline">Chọn nơi bạn muốn hiển thị mục lục.</span>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Word Count Limit</div>
+                    <div className="wp-toc-field">
+                      <input type="number" min="0" className="wp-field wp-toc-small" value={form.toc_word_limit} onChange={set('toc_word_limit')} />
+                      <span className="wp-toc-help-inline">Minimum word count to display TOC. Set to 0 for unlimited words (default).</span>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Giao diện:</div>
+                    <div className="wp-toc-field">
+                      <strong>GHI CHÚ:</strong>
+                      <p className="wp-toc-help">Sử dụng các tùy chọn giao diện bên dưới sẽ ghi đè lên các cài đặt Giao diện toàn cầu.</p>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Thiết bị mục tiêu</div>
+                    <div className="wp-toc-field">
+                      <select className="wp-field wp-toc-select" value={form.toc_device} onChange={set('toc_device')}>
+                        <option value="">Chọn</option>
+                        <option value="all">Tất cả thiết bị</option>
+                        <option value="desktop">Máy tính</option>
+                        <option value="mobile">Di động</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Căn chỉnh</div>
+                    <div className="wp-toc-field">
+                      <select className="wp-field wp-toc-select" value={form.toc_align} onChange={set('toc_align')}>
+                        <option value="">Không có (Mặc định)</option>
+                        <option value="left">Trái</option>
+                        <option value="center">Giữa</option>
+                        <option value="right">Phải</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Nâng cao:</div>
+                    <div className="wp-toc-field">
+                      <strong>GHI CHÚ:</strong>
+                      <p className="wp-toc-help">Sử dụng các tùy chọn nâng cao bên dưới sẽ ghi đè cài đặt nâng cao chung.</p>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Đề mục</div>
+                    <div className="wp-toc-field">
+                      {[1, 2, 3, 4, 5, 6].map(n => (
+                        <label key={n} className="wp-toc-check" style={{ margin: '2px 0' }}>
+                          <input type="checkbox" checked={tocHeadings.includes(String(n))} onChange={() => toggleTocHeading(n)} />
+                          Tiêu đề mục {n} (h{n})
+                        </label>
+                      ))}
+                      <p className="wp-toc-help">Chọn tiêu đề cần xem xét khi tạo mục lục. Bỏ chọn một tiêu đề sẽ loại trừ nó.</p>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Lượt xem ban đầu</div>
+                    <div className="wp-toc-field">
+                      <label className="wp-toc-check">
+                        <input type="checkbox" checked={!!form.toc_initial_hide} onChange={setBool('toc_initial_hide')} />
+                        Ẩn mục lục ban đầu.
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Ẩn bộ đếm</div>
+                    <div className="wp-toc-field">
+                      <label className="wp-toc-check">
+                        <input type="checkbox" checked={!!form.toc_hide_counter} onChange={setBool('toc_hide_counter')} />
+                        Không hiển thị bộ đếm cho mục lục.
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Tiêu đề thay thế</div>
+                    <div className="wp-toc-field">
+                      <textarea className="wp-field" style={{ minHeight: 200, padding: 8 }} value={form.toc_alt_titles} onChange={set('toc_alt_titles')} />
+                      <p className="wp-toc-help">
+                        Chỉ định chuỗi tiêu đề mục lục thay thế. Thêm tiêu đề cần thay thế và tiêu đề thay thế trên một dòng được phân tách bằng dấu <code>|</code>. Đặt từng tiêu đề gốc và tiêu đề thay thế bổ sung trên dòng riêng của nó.
+                      </p>
+                      <p className="wp-toc-help"><strong>Ví dụ:</strong></p>
+                      <p className="wp-toc-help"><code>Level [1.1]|Đầu trang TOC thay thế</code> Thay thế mức [1.1] trong mục lục bằng đầu trang TOC thay thế.</p>
+                      <p className="wp-toc-help"><strong>Lưu ý:</strong> Điều này phân biệt chữ hoa chữ thường.</p>
+                    </div>
+                  </div>
+
+                  <div className="wp-toc-row">
+                    <div className="wp-toc-label">Loại trừ các tiêu đề</div>
+                    <div className="wp-toc-field">
+                      <input className="wp-field wp-toc-input" style={{ maxWidth: '100%' }} value={form.toc_exclude} onChange={set('toc_exclude')} />
+                      <p className="wp-toc-help">
+                        Chỉ định các tiêu đề cần loại trừ khỏi mục lục bài viết. Phân tách nhiều tiêu đề bằng dấu gạch đứng <code>|</code>. Sử dụng dấu hoa thị <code>*</code> như ký tự đại diện để khớp với các văn bản khác.
+                      </p>
+                      <p className="wp-toc-help"><strong>Ví dụ:</strong></p>
+                      <p className="wp-toc-help"><code>Fruit*</code> Bỏ qua các tiêu đề bắt đầu bằng "Fruit"</p>
+                      <p className="wp-toc-help"><code>*Fruit Diet*</code> Bỏ qua các tiêu đề có chứa "Fruit Diet" ở đâu đó trong tiêu đề.</p>
+                      <p className="wp-toc-help"><code>Cây Táo|Cam|Chuối Vàng</code> Bỏ qua các tiêu đề chính xác là "Apple Tree", "Oranges" hoặc "Yellow Bananas"</p>
+                      <p className="wp-toc-help"><code>Lưu ý: Điều này không phân biệt chữ hoa chữ thường.</code></p>
+                    </div>
+                  </div>
+                </div>
+              </MetaBox>
+            </>
           )}
 
-          {/* Social-only editor (no WordPress) */}
           {!hasWordPress && hasSocial && (
-            <div className="border border-gray-300 rounded-lg overflow-hidden bg-white">
-              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 bg-gray-50">
-                {selected.facebook && <MessageSquareShare size={15} className="text-blue-600" />}
-                {selected.linkedin && <Share2 size={15} className="text-sky-600" />}
-                <span className="text-sm font-medium text-gray-700">
-                  Nội dung {[selected.facebook && 'Facebook', selected.linkedin && 'LinkedIn'].filter(Boolean).join(' & ')}
-                </span>
+            <div className="wp-box" style={{ marginTop: 20 }}>
+              <div className="wp-box-head" style={{ cursor: 'default' }}>
+                <h2>Nội dung {socialLabel}</h2>
               </div>
               <textarea
                 value={form.content}
                 onChange={(e) => setForm(f => ({ ...f, content: e.target.value }))}
-                rows={14}
+                className="wp-textarea"
+                style={{ fontFamily: 'inherit', fontSize: 14 }}
                 placeholder="Nhập nội dung bài đăng..."
-                className="w-full px-4 py-3 text-sm focus:outline-none resize-y min-h-[300px]"
               />
             </div>
           )}
 
-          {/* Social content when WordPress is also selected */}
           {hasWordPress && hasSocial && (
-            <div className="border border-blue-200 rounded-lg overflow-hidden bg-white">
-              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-blue-100 bg-blue-50">
-                {selected.facebook && <MessageSquareShare size={15} className="text-blue-600" />}
-                {selected.linkedin && <Share2 size={15} className="text-sky-600" />}
-                <span className="text-sm font-medium text-blue-700">
-                  Nội dung {[selected.facebook && 'Facebook', selected.linkedin && 'LinkedIn'].filter(Boolean).join(' & ')}
-                </span>
-                <span className="text-xs text-blue-400 ml-auto">
+            <div className="wp-box" style={{ marginTop: 20 }}>
+              <div className="wp-box-head" style={{ cursor: 'default' }}>
+                <h2>Nội dung {socialLabel}</h2>
+                <span style={{ color: '#646970', fontSize: 12 }}>
                   {form.content_social ? 'Nội dung riêng' : 'Tự động lấy từ WordPress'}
                 </span>
               </div>
               <textarea
                 value={form.content_social}
                 onChange={(e) => setForm(f => ({ ...f, content_social: e.target.value }))}
-                rows={6}
+                className="wp-textarea"
+                style={{ fontFamily: 'inherit', fontSize: 14, minHeight: 140 }}
                 placeholder="Nội dung text cho mạng xã hội (để trống sẽ lấy từ WordPress, tự bỏ HTML)..."
-                className="w-full px-4 py-3 text-sm focus:outline-none resize-y min-h-[120px]"
               />
             </div>
           )}
 
-          {/* Auto comment — ngay dưới nội dung social */}
           {hasSocial && (
-            <div className="border border-amber-200 rounded-lg overflow-hidden bg-white">
-              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-amber-100 bg-amber-50">
-                <MessageCircle size={15} className="text-amber-600" />
-                <span className="text-sm font-medium text-amber-700">Bình luận tự động</span>
-                <span className="text-xs text-amber-400 ml-auto">
-                  Facebook & LinkedIn
-                </span>
+            <div className="wp-box" style={{ marginTop: hasWordPress ? 0 : 20 }}>
+              <div className="wp-box-head" style={{ cursor: 'default' }}>
+                <h2>Bình luận tự động</h2>
+                <span style={{ color: '#646970', fontSize: 12 }}>Facebook & LinkedIn</span>
               </div>
               <textarea
                 value={form.comment_text}
                 onChange={(e) => setForm(f => ({ ...f, comment_text: e.target.value }))}
-                rows={3}
+                className="wp-textarea"
+                style={{ fontFamily: 'inherit', fontSize: 14, minHeight: 90 }}
                 placeholder="Nội dung comment sau khi đăng bài (VD: link đăng ký, link Zalo, link form...)"
-                className="w-full px-4 py-3 text-sm focus:outline-none resize-y min-h-[80px]"
               />
-              <div className="px-4 pb-2.5">
-                <p className="text-xs text-amber-500">
-                  Tự động comment vào bài Facebook/LinkedIn sau khi đăng. Để trống = không comment.
-                </p>
+              <div className="wp-wordcount" style={{ border: 0, borderTop: '1px solid #dcdcde' }}>
+                Tự động comment vào bài Facebook/LinkedIn sau khi đăng. Để trống = không comment.
               </div>
             </div>
           )}
         </div>
 
-        {/* Sidebar */}
-        <div className="w-72 shrink-0 space-y-4">
-          {/* Publish / Submit */}
-          <SidebarPanel title="Xuất bản" icon={Send} variant="primary">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Trạng thái:</span>
-                <span className="font-medium text-gray-700">
-                  {isEdit ? 'Chỉnh sửa' : isAdmin ? 'Đăng & duyệt' : 'Bản nháp'}
-                </span>
+        {/* ===== Sidebar ===== */}
+        <div className="wp-side">
+          <MetaBox title="Xuất bản">
+            <div className="wp-box-body">
+              <div style={{ marginBottom: 10 }}>
+                <button type="button" className="wp-btn" onClick={() => { syncEditorToForm(); setShowPreview(true) }}>Xem trước</button>
               </div>
-
-              <div>
-                <label className="text-sm text-gray-500 mb-1 block">Độ ưu tiên</label>
+              <div className="wp-row"><Pin size={15} /> Trạng thái: <b>{isEdit ? 'Chỉnh sửa' : isAdmin ? 'Xuất bản' : 'Bản nháp'}</b></div>
+              <div className="wp-row"><Eye size={15} /> Hiển thị: <b>Công khai</b></div>
+              <div className="wp-row">
+                <Flag size={15} /> Ưu tiên:
                 <select
                   value={form.priority}
                   onChange={(e) => setForm(f => ({ ...f, priority: e.target.value }))}
-                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="wp-field"
+                  style={{ flex: 1 }}
                 >
                   <option value="high">Cao — đăng trước</option>
                   <option value="medium">Trung bình</option>
                   <option value="low">Thấp — đăng sau</option>
                 </select>
               </div>
-
-              <div>
-                <label className="flex items-center gap-1.5 text-sm text-gray-500 mb-1">
-                  <Clock size={13} />
-                  Hẹn giờ đăng
-                </label>
+              <div className="wp-row" style={{ alignItems: 'flex-start', flexDirection: 'column' }}>
+                <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><Calendar size={15} /> Lên lịch đăng:</span>
                 <input
                   type="datetime-local"
                   value={form.scheduled_time}
                   onChange={(e) => setForm(f => ({ ...f, scheduled_time: e.target.value }))}
-                  className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="wp-field"
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <span style={{ color: '#646970', fontSize: 12 }}>
                   {isAdmin ? 'Để trống = đăng ngay khi bấm Xuất bản' : 'Để trống = đăng ngay khi workflow chạy'}
-                </p>
-              </div>
-
-              <div className="pt-2 border-t border-gray-100 flex gap-2">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 px-3 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 transition-all"
-                >
-                  {loading ? 'Đang lưu...' : submitLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate('/posts')}
-                  className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 transition-colors text-gray-600"
-                >
-                  Hủy
-                </button>
+                </span>
               </div>
             </div>
-          </SidebarPanel>
+            <div className="wp-publish-foot">
+              <button type="button" className="wp-link-danger" onClick={handleTrash}>
+                {isEdit ? 'Chuyển vào thùng rác' : 'Hủy'}
+              </button>
+              <button type="submit" disabled={loading} className="wp-btn wp-btn-primary">{submitLabel}</button>
+            </div>
+          </MetaBox>
 
-          {/* Platforms */}
-          <SidebarPanel title="Nền tảng" icon={Globe}>
-            <div className="space-y-1.5">
+          <MetaBox title="Nền tảng đăng">
+            <div className="wp-box-body wp-platform">
               {Object.entries(PLATFORM_CONFIG).map(([key, cfg]) => {
                 const Icon = cfg.icon
-                const active = selected[key]
                 return (
-                  <label
-                    key={key}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-all select-none ${
-                      active ? cfg.bg : 'border-transparent hover:bg-gray-50'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={active}
-                      onChange={() => togglePlatform(key)}
-                      className={`w-4 h-4 rounded ${cfg.check}`}
-                    />
-                    <Icon size={15} className={active ? cfg.color : 'text-gray-400'} />
-                    <span className={`text-sm ${active ? 'font-medium text-gray-800' : 'text-gray-500'}`}>{cfg.label}</span>
+                  <label key={key}>
+                    <input type="checkbox" checked={selected[key]} onChange={() => togglePlatform(key)} />
+                    <Icon size={15} color="#50575e" /> {cfg.label}
                   </label>
                 )
               })}
             </div>
-          </SidebarPanel>
+          </MetaBox>
 
-          {/* WordPress categories */}
           {hasWordPress && (
-            <SidebarPanel title="Danh mục" icon={Tag}>
-              {loadingCats && <p className="text-xs text-gray-400">Đang tải danh mục...</p>}
-              {wpCategories.length > 0 && (
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {wpCategories.map(cat => {
-                    const active = selectedCatIds.includes(String(cat.id))
-                    return (
-                      <label
-                        key={cat.id}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer hover:bg-gray-50 select-none"
-                      >
+            <MetaBox title="Danh mục">
+              <div className="wp-box-body">
+                <div className="wp-cat-tabs">
+                  <button type="button" className={`wp-cat-tab ${catTab === 'all' ? 'active' : ''}`} onClick={() => setCatTab('all')}>Tất cả danh mục</button>
+                  <button type="button" className={`wp-cat-tab ${catTab === 'selected' ? 'active' : ''}`} onClick={() => setCatTab('selected')}>Đã chọn</button>
+                </div>
+                <div className="wp-cat-list">
+                  {loadingCats && <p style={{ color: '#646970' }}>Đang tải danh mục...</p>}
+                  {wpCategories
+                    .filter(cat => catTab === 'all' || selectedCatIds.includes(String(cat.id)))
+                    .map(cat => (
+                      <label key={cat.id}>
                         <input
                           type="checkbox"
-                          checked={active}
+                          checked={selectedCatIds.includes(String(cat.id))}
                           onChange={() => toggleCategory(cat.id)}
-                          className="w-3.5 h-3.5 rounded accent-blue-600"
                         />
-                        <span className={`text-sm ${active ? 'text-blue-700 font-medium' : 'text-gray-600'}`}>
-                          {cat.name}
-                        </span>
+                        {cat.name}
                       </label>
-                    )
-                  })}
+                    ))}
+                  {!loadingCats && wpCategories.length === 0 && <p style={{ color: '#646970' }}>Không tải được danh mục</p>}
                 </div>
-              )}
-              {!loadingCats && wpCategories.length === 0 && (
-                <p className="text-xs text-gray-400">Không tải được danh mục</p>
-              )}
-              {selectedCatIds.length === 0 && wpCategories.length > 0 && (
-                <p className="text-xs text-gray-400 mt-2">Không chọn = mặc định WordPress</p>
-              )}
-            </SidebarPanel>
+                {selectedCatIds.length === 0 && wpCategories.length > 0 && (
+                  <p style={{ color: '#646970', fontSize: 12, margin: 0 }}>Không chọn = danh mục mặc định của WordPress</p>
+                )}
+              </div>
+            </MetaBox>
           )}
 
-          {/* Featured image */}
-          <SidebarPanel title="Ảnh đại diện" icon={Image}>
-            <div>
-              {imageUrls.length > 0 ? (
-                <div className="space-y-2 mb-3">
-                  {imageUrls.map((url, i) => (
-                    <div key={i} className="relative group">
-                      <img
-                        src={url}
-                        alt={`Anh ${i + 1}`}
-                        className="w-full h-auto rounded-lg border border-gray-200 object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeImage(i)}
-                        className="absolute top-1.5 right-1.5 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center mb-3">
-                  <Image size={28} className="mx-auto text-gray-300 mb-1" />
-                  <p className="text-xs text-gray-400">Chưa có ảnh</p>
-                </div>
-              )}
+          {hasWordPress && (
+            <MetaBox title="Thẻ">
+              <div className="wp-box-body">
+                <input
+                  className="wp-field"
+                  value={form.tags}
+                  onChange={set('tags')}
+                  placeholder="Thẻ 1, thẻ 2, ..."
+                />
+                <p style={{ color: '#646970', margin: '6px 0 0' }}>Phân cách các thẻ bằng dấu phẩy</p>
+              </div>
+            </MetaBox>
+          )}
 
-              <label className={`block w-full text-center px-3 py-2 bg-gray-100 text-sm rounded-lg cursor-pointer hover:bg-gray-200 transition-colors ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+          <MetaBox title="Ảnh đại diện">
+            <div className="wp-box-body">
+              {imageUrls.map((url, i) => (
+                <div key={i} style={{ marginBottom: 10 }}>
+                  <img src={url} alt={`Ảnh ${i + 1}`} style={{ width: '100%', height: 'auto', display: 'block', marginBottom: 4 }} />
+                  <button type="button" className="wp-link-danger" onClick={() => removeImage(i)}>Xóa ảnh đại diện</button>
+                </div>
+              ))}
+              <label className="wp-link" style={{ display: 'inline-block' }}>
                 {uploading ? 'Đang upload...' : imageUrls.length > 0 ? 'Thêm ảnh' : 'Đặt ảnh đại diện'}
-                <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
+                <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{ display: 'none' }} />
               </label>
-
-              <p className="text-xs text-gray-400 mt-1.5">
-                {hasWordPress ? 'Featured image cho WordPress' : 'Ảnh đính kèm bài đăng'}
+              <p style={{ color: '#646970', fontSize: 12, marginTop: 6 }}>
+                {hasWordPress ? 'Ảnh đầu tiên là ảnh đại diện (Featured image) trên WordPress' : 'Ảnh đính kèm bài đăng'}
               </p>
             </div>
-          </SidebarPanel>
+          </MetaBox>
         </div>
       </div>
 
@@ -635,6 +789,26 @@ export default function PostFormPage() {
           onCancel={() => setModal(null)}
           onClose={() => navigate('/posts')}
         />
+      )}
+
+      {showPreview && (
+        <div className="wp-preview-overlay" onClick={() => setShowPreview(false)}>
+          <div className="wp-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <header>
+              <span>Xem trước: {form.title || '(Không có tiêu đề)'}</span>
+              <button type="button" className="wp-link" onClick={() => setShowPreview(false)}><X size={18} /></button>
+            </header>
+            <div className="wp-preview-content">
+              {imageUrls[0] && <img src={imageUrls[0]} alt="" style={{ marginBottom: 16 }} />}
+              <h1 style={{ fontSize: 28, marginBottom: 16 }}>{form.title}</h1>
+              {getCurrentContent()
+                ? (hasWordPress
+                    ? <div dangerouslySetInnerHTML={{ __html: getCurrentContent() }} />
+                    : <p style={{ whiteSpace: 'pre-wrap' }}>{getCurrentContent()}</p>)
+                : <p style={{ color: '#888' }}>Chưa có nội dung</p>}
+            </div>
+          </div>
+        </div>
       )}
     </form>
   )
