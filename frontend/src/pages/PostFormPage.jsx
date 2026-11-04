@@ -1,9 +1,13 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import { useEffect, useState, useMemo, useRef, useDeferredValue } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { X, MessageSquareShare, Share2, Globe, ChevronUp, ChevronDown, ImagePlus, Pin, Eye, Calendar, Flag } from 'lucide-react'
 import { Editor } from '@tinymce/tinymce-react'
 import { posts, platforms } from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
+import {
+  analyzeSeo, analyzeReadability, lengthBar, STATUS_LABEL, STATUS_COLOR,
+  SEO_TITLE_SUFFIX, TITLE_MAX, DESC_MIN, DESC_MAX,
+} from '../lib/seoAnalysis'
 
 const PLATFORM_CONFIG = {
   facebook: { label: 'Facebook', icon: MessageSquareShare },
@@ -40,6 +44,55 @@ const WP_META_KEYS = Object.keys(WP_META_DEFAULT)
 
 const parseMeta = (raw) => {
   try { return { ...WP_META_DEFAULT, ...(JSON.parse(raw || '{}') || {}) } } catch { return { ...WP_META_DEFAULT } }
+}
+
+function ScoreDot({ status, size = 12 }) {
+  return <span className="seo-dot" style={{ background: STATUS_COLOR[status], width: size, height: size }} />
+}
+
+function LengthBar({ len, min, max }) {
+  const { pct, color } = lengthBar(len, min, max)
+  return <div className="seo-bar"><div style={{ width: `${pct}%`, background: color }} /></div>
+}
+
+const GROUPS = [
+  { key: 'bad', title: 'Vấn đề' },
+  { key: 'ok', title: 'Cần cải thiện' },
+  { key: 'good', title: 'Kết quả tốt' },
+]
+
+function AnalysisPanel({ id, title, result, open, onToggle }) {
+  return (
+    <div className="seo-panel" id={id}>
+      <button type="button" className="seo-panel-head" onClick={onToggle}>
+        <ScoreDot status={result.status} size={14} />
+        <span className="seo-panel-title">{title}</span>
+        <span className="seo-panel-status" style={{ color: STATUS_COLOR[result.status] }}>{STATUS_LABEL[result.status]}</span>
+        {open ? <ChevronUp size={16} color="#50575e" /> : <ChevronDown size={16} color="#50575e" />}
+      </button>
+      {open && (
+        <div className="seo-panel-body">
+          {GROUPS.map(g => {
+            const list = result.items.filter(i => i.status === g.key)
+            if (!list.length) return null
+            return (
+              <div key={g.key} className="seo-group">
+                <div className="seo-group-title">{g.title} ({list.length})</div>
+                <ul>
+                  {list.map(i => (
+                    <li key={i.id}>
+                      <ScoreDot status={i.status} />
+                      <span><b>{i.label}:</b> {i.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const slugify = (str) => (str || '')
@@ -79,6 +132,11 @@ export default function PostFormPage() {
   const [catTab, setCatTab] = useState('all')
   const [wpCategories, setWpCategories] = useState([])
   const [loadingCats, setLoadingCats] = useState(false)
+  // Nội dung cập nhật liên tục để chấm điểm SEO (form.content chỉ đồng bộ khi rời trình soạn thảo)
+  const [liveContent, setLiveContent] = useState('')
+  const deferredContent = useDeferredValue(liveContent)
+  const [seoOpen, setSeoOpen] = useState(true)
+  const [readOpen, setReadOpen] = useState(false)
 
   const imageUrls = form.image_url ? form.image_url.split(',').filter(u => u.trim()) : []
 
@@ -118,6 +176,7 @@ export default function PostFormPage() {
           comment_text: post.comment_text || '',
           ...parseMeta(post.wp_meta),
         })
+        setLiveContent(post.content || '')
       })
     }
   }, [id])
@@ -288,6 +347,18 @@ export default function PostFormPage() {
     }
   }
 
+  const seoResult = useMemo(
+    () => analyzeSeo(form, deferredContent, { host: window.__WP_HOST__ || 'mcna.vn' }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [form.focus_kw, form.seo_title, form.title, form.meta_desc, form.slug, form.image_url, deferredContent],
+  )
+  const readResult = useMemo(() => analyzeReadability(deferredContent), [deferredContent])
+  const goToPanel = (pid) => {
+    if (pid === 'seo-panel') setSeoOpen(true)
+    else setReadOpen(true)
+    document.getElementById(pid)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
   const submitLabel = loading ? 'Đang lưu...' : isEdit ? 'Cập nhật' : isAdmin ? 'Xuất bản' : 'Lưu nháp'
   const wordCount = (() => {
     const t = plainText(form.content)
@@ -334,6 +405,7 @@ export default function PostFormPage() {
                     onInit={(_evt, editor) => { editorRef.current = editor }}
                     initialValue={form.content}
                     onBlur={syncEditorToForm}
+                    onEditorChange={(c) => setLiveContent(c)}
                     init={{
                       height: 500,
                       menubar: false,
@@ -358,7 +430,7 @@ export default function PostFormPage() {
                 {wpEditorMode === 'html' && (
                   <textarea
                     value={form.content}
-                    onChange={(e) => setForm(f => ({ ...f, content: e.target.value }))}
+                    onChange={(e) => { setForm(f => ({ ...f, content: e.target.value })); setLiveContent(e.target.value) }}
                     className="wp-textarea"
                     placeholder="Dán HTML từ WordPress, Gutenberg hoặc nguồn khác..."
                     spellCheck={false}
@@ -375,12 +447,13 @@ export default function PostFormPage() {
                   <div className="wp-label" style={{ marginTop: 16 }}>Google xem trước</div>
                   <div className="wp-serp">
                     <div className="wp-serp-url">{(window.__WP_HOST__ || 'mcna.vn')} › {form.slug || slugify(form.title) || 'duong-dan'}</div>
-                    <div className="wp-serp-title">{form.seo_title || form.title || 'Tiêu đề SEO'} - MCNA</div>
-                    <div className="wp-serp-desc">{form.meta_desc || plainText(form.content).slice(0, 155) || 'Mô tả sẽ hiển thị trong kết quả tìm kiếm.'}</div>
+                    <div className="wp-serp-title">{form.seo_title || form.title || 'Tiêu đề SEO'}{SEO_TITLE_SUFFIX}</div>
+                    <div className="wp-serp-desc">{form.meta_desc || plainText(deferredContent).slice(0, 155) || 'Mô tả sẽ hiển thị trong kết quả tìm kiếm.'}</div>
                   </div>
 
                   <label className="wp-label" style={{ marginTop: 16 }}>Tiêu đề SEO</label>
-                  <input className="wp-field" value={form.seo_title} onChange={set('seo_title')} placeholder="Tiêu đề trang - Tiêu đề website" />
+                  <input className="wp-field" value={form.seo_title} onChange={set('seo_title')} placeholder={form.title || 'Tiêu đề trang - Tiêu đề website'} />
+                  <LengthBar len={(form.seo_title || form.title) ? (form.seo_title || form.title).length + SEO_TITLE_SUFFIX.length : 0} min={40} max={TITLE_MAX} />
 
                   <label className="wp-label" style={{ marginTop: 16 }}>Đường dẫn</label>
                   <input className="wp-field" value={form.slug} onChange={set('slug')} placeholder={slugify(form.title)} />
@@ -389,7 +462,10 @@ export default function PostFormPage() {
                     Thẻ mô tả <span style={{ color: '#646970', fontWeight: 400 }}>({form.meta_desc.length}/156)</span>
                   </label>
                   <textarea className="wp-field" style={{ minHeight: 80, padding: 8 }} value={form.meta_desc} onChange={set('meta_desc')} />
+                  <LengthBar len={form.meta_desc.length} min={DESC_MIN} max={DESC_MAX} />
                 </div>
+                <AnalysisPanel id="seo-panel" title="Phân tích SEO" result={seoResult} open={seoOpen} onToggle={() => setSeoOpen(o => !o)} />
+                <AnalysisPanel id="read-panel" title="Khả năng đọc" result={readResult} open={readOpen} onToggle={() => setReadOpen(o => !o)} />
               </MetaBox>
 
               <MetaBox title="Trích dẫn" defaultOpen={false}>
@@ -608,6 +684,20 @@ export default function PostFormPage() {
               </div>
               <div className="wp-row"><Pin size={15} /> Trạng thái: <b>{isEdit ? 'Chỉnh sửa' : isAdmin ? 'Xuất bản' : 'Bản nháp'}</b></div>
               <div className="wp-row"><Eye size={15} /> Hiển thị: <b>Công khai</b></div>
+              {hasWordPress && (
+                <>
+                  <div className="wp-row">
+                    <ScoreDot status={seoResult.status} />
+                    <button type="button" className="wp-link" onClick={() => goToPanel('seo-panel')}>Phân tích SEO:</button>
+                    <b>{STATUS_LABEL[seoResult.status]}</b>
+                  </div>
+                  <div className="wp-row">
+                    <ScoreDot status={readResult.status} />
+                    <button type="button" className="wp-link" onClick={() => goToPanel('read-panel')}>Khả năng đọc:</button>
+                    <b>{STATUS_LABEL[readResult.status]}</b>
+                  </div>
+                </>
+              )}
               <div className="wp-row">
                 <Flag size={15} /> Ưu tiên:
                 <select
