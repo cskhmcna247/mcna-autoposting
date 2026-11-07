@@ -9,6 +9,7 @@ import WorkflowPage from './pages/WorkflowPage'
 import SettingsPage from './pages/SettingsPage'
 import UsersPage from './pages/UsersPage'
 import CalendarPage from './pages/CalendarPage'
+import ReviewPage from './pages/ReviewPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -37,6 +38,7 @@ function AppRoutes() {
         <Route path="/posts" element={<PostsPage />} />
         <Route path="/posts/new" element={<PostFormPage />} />
         <Route path="/posts/:id/edit" element={<PostFormPage />} />
+        <Route path="/review" element={<ReviewPage />} />
         <Route path="/calendar" element={<AdminRoute><CalendarPage /></AdminRoute>} />
         <Route path="/workflow" element={<AdminRoute><WorkflowPage /></AdminRoute>} />
         <Route path="/users" element={<AdminRoute><UsersPage /></AdminRoute>} />

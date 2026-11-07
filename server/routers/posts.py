@@ -26,6 +26,31 @@ def list_posts(
     return {"posts": posts, "total": total, "limit": limit, "offset": offset}
 
 
+@router.get("/review")
+def list_my_review_posts(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: DatabaseSource = Depends(get_db),
+):
+    """Tab Duyệt bài: chỉ trả về bài chờ duyệt do chính người đăng nhập tạo."""
+    user = _require_user(request)
+    posts, total = db.get_all_posts(status="draft", limit=limit, offset=offset,
+                                    created_by=user["display_name"])
+    # Bài đã duyệt gần đây của chính mình, kèm kết quả đăng từng nền tảng
+    mine, _ = db.get_all_posts(limit=30, created_by=user["display_name"])
+    recent = [p for p in mine if p.get("status") != "draft"][:20]
+    return {"posts": posts, "total": total, "recent": recent, "limit": limit, "offset": offset}
+
+
+@router.post("/check-deleted")
+def check_deleted(request: Request, db: DatabaseSource = Depends(get_db)):
+    """Nút "Kiểm tra bài bị xóa": hỏi từng nền tảng xem các bài đã đăng (30 ngày gần nhất) còn không."""
+    _require_user(request)
+    from src.deletion_check import check_deleted_posts
+    return check_deleted_posts(db.table)
+
+
 @router.get("/calendar")
 def get_calendar(
     start: str = Query(...),
@@ -47,10 +72,10 @@ def get_post(post_id: int, db: DatabaseSource = Depends(get_db)):
 @router.post("", status_code=201)
 def create_post(body: PostCreate, request: Request, db: DatabaseSource = Depends(get_db)):
     user = get_current_user(request)
-    is_admin = user and user["role"] == "admin"
 
     created_by = user["display_name"] if user else body.created_by
-    status = "pending" if is_admin else "draft"
+    # Bài mới nằm ở tab "Duyệt bài"; người viết tự duyệt thì mới được đăng
+    status = "draft"
 
     new_id = db.create_post(
         title=body.title,
@@ -88,22 +113,44 @@ def delete_post(post_id: int, db: DatabaseSource = Depends(get_db)):
     return {"message": "Post deleted"}
 
 
-# ─── Approval: Admin duyệt / từ chối bài ───
+# ─── Duyệt bài: mỗi người chỉ được duyệt / từ chối bài do chính mình tạo ───
+
+
+def _require_user(request: Request) -> dict:
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Chua dang nhap")
+    return user
+
+
+def _require_own_post(post_id: int, request: Request, db: DatabaseSource) -> dict:
+    user = _require_user(request)
+    post = db.get_post_by_id(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if (post.get("created_by") or "").strip() != (user["display_name"] or "").strip():
+        raise HTTPException(status_code=403, detail="Ban chi duoc duyet bai do chinh minh tao")
+    return user
 
 
 @router.post("/{post_id}/approve")
 def approve_post(post_id: int, request: Request, db: DatabaseSource = Depends(get_db)):
-    admin = _require_admin(request)
-    ok = db.approve_post(post_id, approved_by=admin["display_name"])
+    user = _require_own_post(post_id, request, db)
+    ok = db.approve_post(post_id, approved_by=user["display_name"])
     if not ok:
-        raise HTTPException(status_code=400, detail="Bai khong o trang thai draft hoac khong ton tai")
+        raise HTTPException(status_code=400, detail="Bai khong o trang thai cho duyet hoac khong ton tai")
+    # Duyệt xong mà không hẹn giờ -> đăng ngay
+    post = db.get_post_by_id(post_id)
+    if post and not post.get("scheduled_time"):
+        from server.routers.workflow import start_workflow_background
+        start_workflow_background()
     return {"message": "Da duyet bai dang"}
 
 
 @router.post("/{post_id}/reject")
 def reject_post(post_id: int, request: Request, db: DatabaseSource = Depends(get_db)):
-    admin = _require_admin(request)
-    ok = db.reject_post(post_id, approved_by=admin["display_name"])
+    user = _require_own_post(post_id, request, db)
+    ok = db.reject_post(post_id, approved_by=user["display_name"])
     if not ok:
         raise HTTPException(status_code=400, detail="Bai khong o trang thai draft hoac khong ton tai")
     return {"message": "Da tu choi bai dang"}

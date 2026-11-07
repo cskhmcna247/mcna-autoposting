@@ -70,10 +70,12 @@ class DatabaseSource:
         logger.info(f"Tim thay {len(pending)} bai pending (priority + round-robin)")
         return pending
 
-    def mark_posted(self, post_id: int, status: str = "posted"):
+    def mark_posted(self, post_id: int, status: str = "posted", result_json: str = None):
+        # error_message lưu JSON kết quả từng nền tảng (link bài, lỗi nếu có) để hiển thị cho người dùng
         self.table.update({
             "status": status,
             "posted_at": datetime.now().isoformat(),
+            "error_message": result_json,
         }).eq("id", post_id).execute()
         logger.info(f"Cap nhat post ID {post_id} -> {status}")
 
@@ -110,10 +112,13 @@ class DatabaseSource:
 
     # ─── CRUD ───
 
-    def get_all_posts(self, status: str = None, limit: int = 50, offset: int = 0) -> Tuple[List[dict], int]:
+    def get_all_posts(self, status: str = None, limit: int = 50, offset: int = 0,
+                      created_by: str = None) -> Tuple[List[dict], int]:
         query = self.table.select("*", count="exact")
         if status:
             query = query.eq("status", status)
+        if created_by is not None:
+            query = query.eq("created_by", created_by)
         result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
 
         posts = []

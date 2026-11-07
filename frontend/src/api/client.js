@@ -34,6 +34,8 @@ export const posts = {
   create: (data) => api.post('/posts', data).then(r => r.data),
   update: (id, data) => api.put(`/posts/${id}`, data).then(r => r.data),
   delete: (id) => api.delete(`/posts/${id}`).then(r => r.data),
+  checkDeleted: () => api.post('/posts/check-deleted').then(r => r.data),
+  myReview: (params = {}) => api.get('/posts/review', { params }).then(r => r.data),
   approve: (id) => api.post(`/posts/${id}/approve`).then(r => r.data),
   reject: (id) => api.post(`/posts/${id}/reject`).then(r => r.data),
   calendar: (start, end) => api.get('/posts/calendar', { params: { start, end } }).then(r => r.data),

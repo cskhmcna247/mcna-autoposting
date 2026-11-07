@@ -153,7 +153,7 @@ export default function CalendarPage() {
       <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
         <h4 className="text-xs font-semibold text-gray-500 mb-2 uppercase">Chú thích</h4>
         <div className="flex flex-wrap gap-4 text-xs">
-          <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-200" /> Bản nháp</div>
+          <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-200" /> Chờ duyệt</div>
           <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-200" /> Đang chờ</div>
           <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-100 border border-green-200" /> Đã đăng</div>
           <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-50 border border-red-200" /> Từ chối / Thất bại</div>

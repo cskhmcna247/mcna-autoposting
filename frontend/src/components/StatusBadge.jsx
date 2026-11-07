@@ -5,15 +5,17 @@ const colors = {
   failed: 'bg-red-100 text-red-800',
   rejected: 'bg-red-50 text-red-600',
   partial: 'bg-orange-100 text-orange-800',
+  deleted: 'bg-gray-200 text-gray-600',
 }
 
 const labels = {
-  draft: 'Bản nháp',
+  draft: 'Chờ duyệt',
   pending: 'Đang chờ',
   posted: 'Đã đăng',
   failed: 'Thất bại',
   rejected: 'Từ chối',
   partial: 'Một phần',
+  deleted: 'Đã xóa trên trang',
 }
 
 export default function StatusBadge({ status }) {

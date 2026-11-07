@@ -65,7 +65,7 @@ class GoogleSheetsSource:
         logger.info(f"Tim thay {len(pending)} bai dang pending tu Google Sheets")
         return pending
 
-    def mark_posted(self, row_index: int, status: str = "posted"):
+    def mark_posted(self, row_index: int, status: str = "posted", result_json: str = None):
         status_col = 5  # Column E
         posted_at_col = 7  # Column G
         self.sheet.update_cell(row_index, status_col, status)

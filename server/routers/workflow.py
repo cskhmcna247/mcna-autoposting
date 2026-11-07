@@ -10,18 +10,13 @@ router = APIRouter(prefix="/api/workflow", tags=["workflow"])
 
 _last_log: str = ""
 _running: bool = False
+_rerun: bool = False  # Có bài mới trong lúc đang chạy -> chạy thêm 1 lượt sau khi xong
+_lock = threading.Lock()
 
 
-@router.post("/run")
-def run_workflow_now():
-    global _last_log, _running
-
-    if _running:
-        return {"status": "already_running", "message": "Workflow dang chay"}
-
-    def _execute():
-        global _last_log, _running
-        _running = True
+def _execute():
+    global _last_log, _running, _rerun
+    while True:
         log_stream = StringIO()
         handler = logging.StreamHandler(log_stream)
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
@@ -35,10 +30,29 @@ def run_workflow_now():
         finally:
             root_logger.removeHandler(handler)
             _last_log = log_stream.getvalue()
-            _running = False
+        with _lock:
+            if not _rerun:
+                _running = False
+                return
+            _rerun = False
 
-    thread = threading.Thread(target=_execute, daemon=True)
-    thread.start()
+
+def start_workflow_background() -> bool:
+    """Chạy workflow ở luồng nền. Trả về False nếu đang chạy (khi đó sẽ chạy thêm 1 lượt sau)."""
+    global _running, _rerun
+    with _lock:
+        if _running:
+            _rerun = True
+            return False
+        _running = True
+    threading.Thread(target=_execute, daemon=True).start()
+    return True
+
+
+@router.post("/run")
+def run_workflow_now():
+    if not start_workflow_background():
+        return {"status": "already_running", "message": "Workflow dang chay"}
     return {"status": "started", "message": "Workflow bat dau chay"}
 
 

@@ -161,6 +161,24 @@ class FacebookPoster:
         logger.info(f"Facebook comment thanh cong: {comment_id}")
         return {"success": True, "comment_id": comment_id}
 
+    def exists(self, post_id: str):
+        """True = bài còn, False = bài đã bị xóa, None = không xác định được (lỗi token/mạng)."""
+        try:
+            resp = requests.get(f"{GRAPH_API_BASE}/{post_id}",
+                                params={"fields": "id", "access_token": self.access_token}, timeout=10)
+            data = resp.json()
+        except Exception as e:
+            logger.warning(f"Facebook: khong kiem tra duoc bai {post_id} - {e}")
+            return None
+        if data.get("id"):
+            return True
+        err = data.get("error", {})
+        msg = (err.get("message") or "").lower()
+        if err.get("code") == 100 and (err.get("error_subcode") == 33 or "does not exist" in msg):
+            return False
+        logger.warning(f"Facebook: khong xac dinh duoc bai {post_id} - {err.get('message')}")
+        return None
+
     def verify_token(self) -> bool:
         url = f"{GRAPH_API_BASE}/me"
         params = {"access_token": self.access_token}

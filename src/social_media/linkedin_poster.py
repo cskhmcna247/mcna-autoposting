@@ -55,6 +55,22 @@ class LinkedInPoster:
         logger.info(f"Dang bai LinkedIn thanh cong: {post_id}")
         return {"platform": "linkedin", "post_id": post_id, "success": True}
 
+    def exists(self, post_id: str):
+        """True = bài còn, False = bài đã bị xóa, None = không xác định được."""
+        from urllib.parse import quote
+        try:
+            resp = requests.get(f"{LINKEDIN_API_BASE}/ugcPosts/{quote(post_id, safe='')}",
+                                headers=self._headers(), timeout=10)
+        except Exception as e:
+            logger.warning(f"LinkedIn: khong kiem tra duoc bai {post_id} - {e}")
+            return None
+        if resp.status_code == 200:
+            return True
+        if resp.status_code in (404, 410):
+            return False
+        logger.warning(f"LinkedIn: khong xac dinh duoc bai {post_id} ({resp.status_code}) - {resp.text[:150]}")
+        return None
+
     def _register_upload(self) -> tuple:
         url = f"{LINKEDIN_API_BASE}/assets?action=registerUpload"
         payload = {

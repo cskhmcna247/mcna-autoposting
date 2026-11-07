@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, FileText, Play, Settings, LogOut, User, Users, Calendar } from 'lucide-react'
+import { LayoutDashboard, FileText, Play, Settings, LogOut, User, Users, Calendar, ClipboardCheck } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Layout() {
@@ -9,6 +9,7 @@ export default function Layout() {
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/posts', icon: FileText, label: 'Bài đăng' },
+    { to: '/review', icon: ClipboardCheck, label: 'Duyệt bài' },
     ...(isAdmin ? [
       { to: '/calendar', icon: Calendar, label: 'Lịch đăng' },
       { to: '/workflow', icon: Play, label: 'Workflow' },

@@ -22,7 +22,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <StatCard icon={FileText} label="Tổng bài" value={stats.total} color="text-indigo-600" />
-        <StatCard icon={FileEdit} label="Bản nháp" value={stats.draft} color="text-gray-600" />
+        <StatCard icon={FileEdit} label="Chờ duyệt" value={stats.draft} color="text-gray-600" />
         <StatCard icon={Clock} label="Đang chờ" value={stats.pending} color="text-yellow-600" />
         <StatCard icon={CheckCircle} label="Đã đăng" value={stats.posted} color="text-green-600" />
         <StatCard icon={AlertTriangle} label="Thất bại" value={stats.failed} color="text-red-600" />

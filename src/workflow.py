@@ -4,6 +4,7 @@ from src.config_loader import CONTENT_SOURCE
 from src.social_media.facebook_poster import FacebookPoster
 from src.social_media.linkedin_poster import LinkedInPoster
 from src.social_media.wordpress_poster import WordPressPoster
+from src import post_result
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,7 @@ def run_workflow():
 
             success_platforms = []
             failed_platforms = []
+            results = []  # Kết quả từng nền tảng, hiển thị cho người dùng
 
             social_content = post.get("content_social", "").strip()
 
@@ -99,6 +101,8 @@ def run_workflow():
                 poster = posters.get(platform)
                 if not poster:
                     logger.warning(f"Nen tang '{platform}' khong kha dung, bo qua")
+                    failed_platforms.append(platform)
+                    results.append(post_result.fail(platform, f"Nen tang '{platform}' khong kha dung"))
                     continue
 
                 if platform == "wordpress":
@@ -125,30 +129,41 @@ def run_workflow():
                         success_platforms.append(platform)
                         logger.info(f"  -> {platform}: OK (ID: {result.get('post_id', 'N/A')})")
 
+                        comment_info = None
                         comment_text = post.get("comment_text", "").strip()
                         if comment_text and platform in ("facebook", "linkedin") and hasattr(poster, "comment"):
                             try:
                                 cm = poster.comment(result["post_id"], comment_text)
                                 if cm.get("success"):
                                     logger.info(f"  -> {platform} comment: OK")
+                                    comment_info = {"ok": True}
                                 else:
                                     logger.warning(f"  -> {platform} comment: {cm.get('error', 'that bai')}")
+                                    comment_info = {"ok": False, "detail": str(cm.get("error", "that bai"))[:300]}
                             except Exception as ce:
                                 logger.warning(f"  -> {platform} comment that bai: {ce}")
+                                comment_info = {"ok": False, "detail": str(ce)[:300]}
+                        results.append(post_result.ok(platform, result, comment_info))
+                    else:
+                        # Poster trả về thất bại (không ném lỗi) -> vẫn phải tính là thất bại
+                        failed_platforms.append(platform)
+                        logger.error(f"  -> {platform}: THAT BAI - {result.get('error')}")
+                        results.append(post_result.fail(platform, result.get("error")))
                 except Exception as e:
                     failed_platforms.append(platform)
                     logger.error(f"  -> {platform}: THAT BAI - {e}")
+                    results.append(post_result.fail(platform, str(e)))
 
+            result_json = post_result.dumps(results)
             if success_platforms and not failed_platforms:
-                source.mark_posted(post_id_key, "posted")
+                source.mark_posted(post_id_key, "posted", result_json)
                 total_posted += 1
             elif success_platforms and failed_platforms:
                 status = f"partial: ok={','.join(success_platforms)} fail={','.join(failed_platforms)}"
-                source.mark_posted(post_id_key, status)
+                source.mark_posted(post_id_key, status, result_json)
                 total_posted += 1
             else:
-                error_msg = f"Tat ca nen tang that bai: {','.join(failed_platforms)}"
-                source.mark_failed(post_id_key, error_msg)
+                source.mark_failed(post_id_key, result_json)
                 total_failed += 1
 
     logger.info(f"HOAN THANH: {total_posted} thanh cong, {total_failed} that bai")

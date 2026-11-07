@@ -162,6 +162,21 @@ class WordPressPoster:
             logger.warning(f"WordPress: upload anh that bai - {e}")
         return None
 
+    def exists(self, post_id) -> "bool | None":
+        """True = bài còn, False = bài đã bị xóa hoặc cho vào thùng rác, None = không xác định được."""
+        try:
+            resp = requests.get(f"{self.api_url}/posts/{post_id}", params={"context": "edit"},
+                                headers=self.headers, timeout=15)
+        except Exception as e:
+            logger.warning(f"WordPress: khong kiem tra duoc bai {post_id} - {e}")
+            return None
+        if resp.status_code == 200:
+            return resp.json().get("status") != "trash"
+        if resp.status_code in (404, 410):
+            return False
+        logger.warning(f"WordPress: khong xac dinh duoc bai {post_id} ({resp.status_code}) - {resp.text[:150]}")
+        return None
+
     def verify_token(self) -> dict:
         resp = requests.get(
             f"{self.api_url}/users/me",

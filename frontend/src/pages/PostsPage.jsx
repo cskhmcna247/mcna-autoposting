@@ -1,26 +1,26 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pencil, Trash2, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, RefreshCw } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge'
 import PriorityBadge from '../components/PriorityBadge'
+import PostResult from '../components/PostResult'
 import { posts } from '../api/client'
-import { useAuth } from '../contexts/AuthContext'
 
-const tabs = ['all', 'draft', 'pending', 'posted', 'rejected', 'failed']
+const tabs = ['all', 'draft', 'pending', 'posted', 'rejected', 'failed', 'deleted']
 const tabLabels = {
   all: 'Tất cả',
-  draft: 'Bản nháp',
+  draft: 'Chờ duyệt',
   pending: 'Đang chờ',
   posted: 'Đã đăng',
   rejected: 'Từ chối',
   failed: 'Thất bại',
+  deleted: 'Đã xóa trên trang',
 }
 
 export default function PostsPage() {
   const navigate = useNavigate()
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
   const [data, setData] = useState({ posts: [], total: 0 })
+  const [checking, setChecking] = useState(false)
   const [tab, setTab] = useState('all')
   const [page, setPage] = useState(0)
   const limit = 20
@@ -33,42 +33,55 @@ export default function PostsPage() {
 
   useEffect(() => { load() }, [tab, page])
 
+  // Bài vừa tạo được đăng ở nền sau vài giây -> tự tải lại khi còn bài "Đang chờ" tới lượt đăng
+  const hasDuePending = data.posts.some(p =>
+    p.status === 'pending' && (!p.scheduled_time || new Date(p.scheduled_time) <= new Date()))
+  useEffect(() => {
+    if (!hasDuePending) return
+    const t = setInterval(load, 5000)
+    return () => clearInterval(t)
+  }, [hasDuePending, tab, page])
+
+  const handleCheckDeleted = async () => {
+    setChecking(true)
+    try {
+      const r = await posts.checkDeleted()
+      if (r.skipped) alert('Hệ thống đang kiểm tra, vui lòng thử lại sau ít phút.')
+      else alert(r.deleted ? `Phát hiện ${r.deleted} bài đã bị xóa trên trang.` : `Đã kiểm tra ${r.checked} bài, không có bài nào bị xóa.`)
+      load()
+    } catch (err) {
+      alert('Lỗi: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setChecking(false)
+    }
+  }
+
   const handleDelete = async (id) => {
     if (!confirm('Xóa bài đăng này?')) return
     await posts.delete(id)
     load()
   }
 
-  const handleApprove = async (id) => {
-    if (!confirm('Duyệt bài đăng này?')) return
-    try {
-      await posts.approve(id)
-      load()
-    } catch (err) {
-      alert(err.response?.data?.detail || err.message)
-    }
-  }
-
-  const handleReject = async (id) => {
-    if (!confirm('Từ chối bài đăng này?')) return
-    try {
-      await posts.reject(id)
-      load()
-    } catch (err) {
-      alert(err.response?.data?.detail || err.message)
-    }
-  }
-
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-900">Bài đăng</h2>
+        <div className="flex gap-2">
+        <button
+          onClick={handleCheckDeleted}
+          disabled={checking}
+          title="Kiểm tra các bài đã đăng trong 30 ngày còn trên Facebook/LinkedIn/WordPress không"
+          className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={checking ? 'animate-spin' : ''} /> {checking ? 'Đang kiểm tra...' : 'Kiểm tra bài bị xóa'}
+        </button>
         <button
           onClick={() => navigate('/posts/new')}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
         >
           <Plus size={16} /> Tạo bài mới
         </button>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -103,7 +116,10 @@ export default function PostsPage() {
             {data.posts.map(post => (
               <tr key={post.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-500">{post.id}</td>
-                <td className="px-4 py-3 text-gray-900 max-w-xs truncate">{post.title || post.content?.slice(0, 50)}</td>
+                <td className="px-4 py-3 text-gray-900 max-w-md">
+                  <div className="truncate">{post.title || post.content?.replace(/<[^>]+>/g, '').slice(0, 50)}</div>
+                  <div className="mt-1.5"><PostResult post={post} compact /></div>
+                </td>
                 <td className="px-4 py-3 text-gray-500 text-xs">{post.platforms}</td>
                 <td className="px-4 py-3"><PriorityBadge priority={post.priority} /></td>
                 <td className="px-4 py-3"><StatusBadge status={post.status} /></td>
@@ -113,16 +129,6 @@ export default function PostsPage() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1.5">
-                    {isAdmin && post.status === 'draft' && (
-                      <>
-                        <button onClick={() => handleApprove(post.id)} title="Duyệt" className="p-1 text-green-500 hover:text-green-700 hover:bg-green-50 rounded">
-                          <CheckCircle size={16} />
-                        </button>
-                        <button onClick={() => handleReject(post.id)} title="Từ chối" className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
-                          <XCircle size={16} />
-                        </button>
-                      </>
-                    )}
                     <button onClick={() => navigate(`/posts/${post.id}/edit`)} className="p-1 text-gray-400 hover:text-indigo-600 rounded">
                       <Pencil size={15} />
                     </button>

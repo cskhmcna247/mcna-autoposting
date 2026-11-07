@@ -6,9 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from server.routers import auth, dashboard, posts, workflow, platforms, settings
-from server.scheduler import start_scheduler, stop_scheduler
+from server.scheduler import start_scheduler, stop_scheduler, add_workflow_job, add_deletion_check_job
 
-from src.config_loader import setup_logging
+from src.config_loader import setup_logging, SCHEDULE_HOURLY_INTERVAL
 
 setup_logging()
 
@@ -19,6 +19,9 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_scheduler()
+    # Tự bật lịch đăng bài khi khởi động (trước đây lịch mất mỗi lần restart server)
+    add_workflow_job(SCHEDULE_HOURLY_INTERVAL)
+    add_deletion_check_job(30)
     yield
     stop_scheduler()
 

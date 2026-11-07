@@ -110,7 +110,6 @@ export default function PostFormPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const isEdit = !!id
-  const isAdmin = user?.role === 'admin'
   const editorRef = useRef(null)
 
   const [form, setForm] = useState({
@@ -134,6 +133,7 @@ export default function PostFormPage() {
   const [loadingCats, setLoadingCats] = useState(false)
   // Nội dung cập nhật liên tục để chấm điểm SEO (form.content chỉ đồng bộ khi rời trình soạn thảo)
   const [liveContent, setLiveContent] = useState('')
+  const [origStatus, setOrigStatus] = useState('')
   const deferredContent = useDeferredValue(liveContent)
   const [seoOpen, setSeoOpen] = useState(true)
   const [readOpen, setReadOpen] = useState(false)
@@ -177,6 +177,7 @@ export default function PostFormPage() {
           ...parseMeta(post.wp_meta),
         })
         setLiveContent(post.content || '')
+        setOrigStatus(post.status || '')
       })
     }
   }, [id])
@@ -261,7 +262,8 @@ export default function PostFormPage() {
       } else {
         await posts.create(data)
       }
-      navigate('/posts')
+      // Bài mới (hoặc bài đang chờ duyệt) -> sang tab Duyệt bài để người viết tự duyệt
+      navigate(!isEdit || origStatus === 'draft' ? '/review' : '/posts')
     } catch (err) {
       alert('Lỗi: ' + (err.response?.data?.detail || err.message))
     } finally {
@@ -359,7 +361,7 @@ export default function PostFormPage() {
     document.getElementById(pid)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 
-  const submitLabel = loading ? 'Đang lưu...' : isEdit ? 'Cập nhật' : isAdmin ? 'Xuất bản' : 'Lưu nháp'
+  const submitLabel = loading ? 'Đang lưu...' : isEdit ? 'Cập nhật' : 'Lưu & chờ duyệt'
   const wordCount = (() => {
     const t = plainText(form.content)
     return t ? t.split(/\s+/).length : 0
@@ -369,11 +371,12 @@ export default function PostFormPage() {
     <form onSubmit={handleSubmit} className="wp-wrap">
       <h1 className="wp-heading">{isEdit ? 'Sửa bài viết' : 'Thêm bài viết'}</h1>
 
-      {!isEdit && !isAdmin && (
-        <div style={{ background: '#fcf9e8', borderLeft: '4px solid #dba617', padding: '10px 12px', marginBottom: 16, boxShadow: '0 1px 1px rgba(0,0,0,.04)' }}>
-          Bài đăng của bạn sẽ ở trạng thái <strong>Bản nháp</strong> và cần Admin duyệt trước khi đăng.
+      {!isEdit && (
+        <div style={{ background: '#f0f6fc', borderLeft: '4px solid #2271b1', padding: '10px 12px', marginBottom: 16, boxShadow: '0 1px 1px rgba(0,0,0,.04)' }}>
+          Lưu xong, bài sẽ nằm ở tab <strong>Duyệt bài</strong>. Bạn kiểm tra lại rồi bấm <strong>Duyệt</strong> thì bài mới được đăng.
         </div>
       )}
+
 
       <div className="wp-layout">
         {/* ===== Cột chính ===== */}
@@ -682,7 +685,7 @@ export default function PostFormPage() {
               <div style={{ marginBottom: 10 }}>
                 <button type="button" className="wp-btn" onClick={() => { syncEditorToForm(); setShowPreview(true) }}>Xem trước</button>
               </div>
-              <div className="wp-row"><Pin size={15} /> Trạng thái: <b>{isEdit ? 'Chỉnh sửa' : isAdmin ? 'Xuất bản' : 'Bản nháp'}</b></div>
+              <div className="wp-row"><Pin size={15} /> Trạng thái: <b>{isEdit ? 'Chỉnh sửa' : 'Chờ duyệt'}</b></div>
               <div className="wp-row"><Eye size={15} /> Hiển thị: <b>Công khai</b></div>
               {hasWordPress && (
                 <>
